@@ -1,0 +1,9 @@
+pandas
+numpy
+matplotlib
+dotenv
+joblib
+torch
+torchvision
+requests
+scikit-learn
