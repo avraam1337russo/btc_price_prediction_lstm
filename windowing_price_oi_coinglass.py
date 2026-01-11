@@ -131,17 +131,43 @@ import joblib
 from sklearn.preprocessing import StandardScaler
 
 # 1. Загрузка и первичная обработка
-df = pd.read_csv("train_data_bybit_.csv")
+df = pd.read_csv("data/data_multi_exchange__bybit_ethbtcsol_3_.csv")
 df['time'] = pd.to_datetime(df['time'])
 df = df.sort_values('time')
 
 # --- FEATURE ENGINEERING (Создаем относительные величины) ---
 # Предсказываем % изменения цены на СЛЕДУЮЩИЙ день
-df['target_pct'] = df['price'].pct_change().shift(-1) * 100
+df['target_pct'] = df['Binance_BTCUSDT_price'].pct_change().shift(-1) * 100
 
+
+# Bybit
 # Другие признаки переводим в изменения, чтобы уйти от огромных чисел
-df['oi_change_pct'] = df['oi'].pct_change() * 100
-df['vol_change_pct'] = df['volume_usd'].pct_change() * 100
+df['bybit_btc_oi_change_pct'] = df['bybit_BTCUSDT_oi'].pct_change() * 100
+df['bybit_btc_vol_change_pct'] = df['bybit_BTCUSDT_volume_usd'].pct_change() * 100
+
+df['bybit_eth_oi_change_pct'] = df['bybit_ETHUSDT_oi'].pct_change() * 100
+df['bybit_eth_vol_change_pct'] = df['bybit_ETHUSDT_volume_usd'].pct_change() * 100
+
+df['bybit_sol_oi_change_pct'] = df['bybit_SOLUSDT_oi'].pct_change() * 100
+df['bybit_sol_vol_change_pct'] = df['bybit_SOLUSDT_volume_usd'].pct_change() * 100
+
+
+
+# Binance
+df['Binance_btc_oi_change_pct'] = df['Binance_BTCUSDT_oi'].pct_change() * 100
+df['Binance_btc_vol_change_pct'] = df['Binance_BTCUSDT_volume_usd'].pct_change() * 100
+
+df['Binance_eth_oi_change_pct'] = df['Binance_ETHUSDT_oi'].pct_change() * 100
+df['Binance_eth_vol_change_pct'] = df['Binance_ETHUSDT_volume_usd'].pct_change() * 100
+
+df['Binance_sol_oi_change_pct'] = df['Binance_SOLUSDT_oi'].pct_change() * 100
+df['Binance_sol_vol_change_pct'] = df['Binance_SOLUSDT_volume_usd'].pct_change() * 100
+
+
+
+
+
+
 
 # Ликвидации и дельту оставляем в USD, но StandardScaler их выровняет
 # Удаляем пустые строки, возникшие после pct_change и shift
@@ -151,13 +177,69 @@ df.dropna(inplace=True)
 # Мы берем те данные, которые модель будет видеть в момент "сегодня"
 features_list = [
     'target_pct', # (как история прошлых изменений)
-    'oi_change_pct',
-    'vol_change_pct',
-    'ls_ratio',
-    'taker_delta',
-    'long_liquidation_usd',
-    'short_liquidation_usd',
-    'liq_delta'
+    
+    'bybit_btc_oi_change_pct',
+    'bybit_btc_vol_change_pct',
+    'bybit_BTCUSDT_ls_ratio',
+    'bybit_BTCUSDT_taker_delta',
+    'bybit_BTCUSDT_long_liquidation_usd',
+    'bybit_BTCUSDT_short_liquidation_usd',
+    'bybit_BTCUSDT_liq_delta',
+    
+    
+    'bybit_eth_oi_change_pct',
+    'bybit_eth_vol_change_pct',
+    'bybit_ETHUSDT_ls_ratio',
+    'bybit_ETHUSDT_taker_delta',
+    'bybit_ETHUSDT_long_liquidation_usd',
+    'bybit_ETHUSDT_short_liquidation_usd',
+    'bybit_ETHUSDT_liq_delta',
+
+
+
+
+
+    'bybit_sol_oi_change_pct',
+    'bybit_sol_vol_change_pct',
+    'bybit_SOLUSDT_ls_ratio',
+    'bybit_SOLUSDT_taker_delta',
+    'bybit_SOLUSDT_long_liquidation_usd',
+    'bybit_SOLUSDT_short_liquidation_usd',
+    'bybit_SOLUSDT_liq_delta',
+    
+    
+    
+    
+    
+    
+    
+    
+    #======================================
+
+    'Binance_btc_oi_change_pct',
+    'Binance_btc_vol_change_pct',
+    'Binance_BTCUSDT_ls_ratio',
+    'Binance_BTCUSDT_taker_delta',
+    'Binance_BTCUSDT_long_liquidation_usd',
+    'Binance_BTCUSDT_short_liquidation_usd',
+    'Binance_BTCUSDT_liq_delta',
+
+    'Binance_eth_oi_change_pct',
+    'Binance_eth_vol_change_pct',
+    'Binance_ETHUSDT_ls_ratio',
+    'Binance_ETHUSDT_taker_delta',
+    'Binance_ETHUSDT_long_liquidation_usd',
+    'Binance_ETHUSDT_short_liquidation_usd',
+    'Binance_ETHUSDT_liq_delta',
+
+    'Binance_sol_oi_change_pct',
+    'Binance_sol_vol_change_pct',
+    'Binance_SOLUSDT_ls_ratio',
+    'Binance_SOLUSDT_taker_delta',
+    'Binance_SOLUSDT_long_liquidation_usd',
+    'Binance_SOLUSDT_short_liquidation_usd',
+    'Binance_SOLUSDT_liq_delta',
+
 ]
 
 # Выделяем массив признаков

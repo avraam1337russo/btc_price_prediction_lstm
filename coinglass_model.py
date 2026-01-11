@@ -4,20 +4,10 @@ from torch.utils.data import DataLoader, TensorDataset
 import matplotlib.pyplot as plt
 from windowing_price_oi_coinglass import X_train, y_train, X_test, y_test
 import numpy as np
-
-print("Start")
-# Конвертируем numpy массивы в тензоры PyTorch
-X_train_t = torch.tensor(X_train, dtype=torch.float32)
-y_train_t = torch.tensor(y_train, dtype=torch.float32).view(-1, 1) # делаем колонку
-
-X_test_t = torch.tensor(X_test, dtype=torch.float32)
-y_test_t = torch.tensor(y_test, dtype=torch.float32).view(-1, 1)
-
-# Создаем загрузчики данных
-train_loader = DataLoader(TensorDataset(X_train_t, y_train_t), batch_size=32, shuffle=False)
-test_loader = DataLoader(TensorDataset(X_test_t, y_test_t), batch_size=32, shuffle=False)
-
 import torch.nn as nn
+
+
+
 
 
 class LSTMModel(nn.Module):
@@ -121,86 +111,92 @@ class LSTMModel(nn.Module):
 # print(f"Средняя ошибка модели (MAE): ${mae:.2f}")
 
 
+if __name__ == '__main__':
+    # Конвертируем numpy массивы в тензоры PyTorch
+    X_train_t = torch.tensor(X_train, dtype=torch.float32)
+    y_train_t = torch.tensor(y_train, dtype=torch.float32).view(-1, 1)  # делаем колонку
 
+    X_test_t = torch.tensor(X_test, dtype=torch.float32)
+    y_test_t = torch.tensor(y_test, dtype=torch.float32).view(-1, 1)
 
-# --- НАСТРОЙКИ ---
-# Теперь input_dim = 8 (features_list из предыдущего шага: target_pct, oi_change, etc.)
-INPUT_DIM = 8
-HIDDEN_DIM = 64
-NUM_LAYERS = 2
-OUTPUT_DIM = 1
-LEARNING_RATE = 0.0005  # Для процентов лучше чуть ниже, чтобы не "пролетать" минимум
-EPOCHS = 500
+    # Создаем загрузчики данных
+    train_loader = DataLoader(TensorDataset(X_train_t, y_train_t), batch_size=32, shuffle=False)
+    test_loader = DataLoader(TensorDataset(X_test_t, y_test_t), batch_size=32, shuffle=False)
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    # --- НАСТРОЙКИ ---
+    # Теперь input_dim = 21 (features_list из предыдущего шага: target_pct, oi_change, etc.)
+    INPUT_DIM = 43
+    HIDDEN_DIM = 64
+    NUM_LAYERS = 2
+    OUTPUT_DIM = 1
+    LEARNING_RATE = 0.0005  # Для процентов лучше чуть ниже, чтобы не "пролетать" минимум
+    EPOCHS = 500
 
-# Инициализация модели
-model = LSTMModel(input_dim=INPUT_DIM, hidden_dim=HIDDEN_DIM, num_layers=NUM_LAYERS, output_dim=OUTPUT_DIM).to(device)
-criterion = nn.MSELoss()
-optimizer = torch.optim.Adam(model.parameters(), lr=LEARNING_RATE)
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-# --- ЦИКЛ ОБУЧЕНИЯ ---
-train_losses = []
+    # Инициализация модели
+    model = LSTMModel(input_dim=INPUT_DIM, hidden_dim=HIDDEN_DIM, num_layers=NUM_LAYERS, output_dim=OUTPUT_DIM).to(
+        device)
+    criterion = nn.MSELoss()
+    optimizer = torch.optim.Adam(model.parameters(), lr=LEARNING_RATE)
 
-for epoch in range(EPOCHS):
-    model.train()
-    total_loss = 0
-    for batch_X, batch_y in train_loader:
-        batch_X, batch_y = batch_X.to(device), batch_y.to(device)
+    # --- ЦИКЛ ОБУЧЕНИЯ ---
+    train_losses = []
 
-        optimizer.zero_grad()
-        outputs = model(batch_X)
+    for epoch in range(EPOCHS):
+        model.train()
+        total_loss = 0
+        for batch_X, batch_y in train_loader:
+            batch_X, batch_y = batch_X.to(device), batch_y.to(device)
 
-        # Важно: убедитесь, что размерности совпадают (batch_size, 1)
-        loss = criterion(outputs, batch_y)
+            optimizer.zero_grad()
+            outputs = model(batch_X)
 
-        loss.backward()
-        optimizer.step()
-        total_loss += loss.item()
+            # Важно: убедитесь, что размерности совпадают (batch_size, 1)
+            loss = criterion(outputs, batch_y)
 
-    if epoch % 10 == 0:
-        print(f"Epoch {epoch} | Loss: {total_loss / len(train_loader):.4f}")
+            loss.backward()
+            optimizer.step()
+            total_loss += loss.item()
 
+        if epoch % 10 == 0:
+            print(f"Epoch {epoch} | Loss: {total_loss / len(train_loader):.4f}")
 
-torch.save(model.state_dict(), 'lstm_bybit_.pth')
-# Загружаем скалеры (созданные на этапе подготовки данных)
-scaler_x = joblib.load('scaler_x.pkl')
-scaler_y = joblib.load('scaler_y.pkl')
+    torch.save(model.state_dict(), 'lstm_multi_xchange_data.pth')
+    # Загружаем скалеры (созданные на этапе подготовки данных)
+    scaler_x = joblib.load('scaler_x.pkl')
+    scaler_y = joblib.load('scaler_y.pkl')
 
-model.eval()
-with torch.no_grad():
-    # Предсказания на тестовых данных
-    X_test_t = X_test_t.to(device)
-    predictions_scaled = model(X_test_t).cpu().numpy()
-    actuals_scaled = y_test_t.numpy()
+    model.eval()
+    with torch.no_grad():
+        # Предсказания на тестовых данных
+        X_test_t = X_test_t.to(device)
+        predictions_scaled = model(X_test_t).cpu().numpy()
+        actuals_scaled = y_test_t.numpy()
 
-# Обратное масштабирование: из нормализованных чисел обратно в ПРОЦЕНТЫ
-pred_pct = scaler_y.inverse_transform(predictions_scaled)
-actual_pct = scaler_y.inverse_transform(actuals_scaled)
+    # Обратное масштабирование: из нормализованных чисел обратно в ПРОЦЕНТЫ
+    pred_pct = scaler_y.inverse_transform(predictions_scaled)
+    actual_pct = scaler_y.inverse_transform(actuals_scaled)
 
-# Теперь pred_pct — это массив реальных процентов (например, 1.25, -0.5 и т.д.)
+    # Теперь pred_pct — это массив реальных процентов (например, 1.25, -0.5 и т.д.)
 
+    plt.figure(figsize=(15, 6))
+    plt.plot(actual_pct, label='Реальное изменение %', color='royalblue', alpha=0.7)
+    plt.plot(pred_pct, label='Предсказание модели %', color='orange', linestyle='--', alpha=0.9)
 
+    plt.axhline(0, color='black', linewidth=1, alpha=0.5)  # Линия нуля
+    plt.title('Предсказание процентного изменения BTC (Tomorrow Returns)')
+    plt.xlabel('Дни')
+    plt.ylabel('Изменение цены (%)')
+    plt.legend()
+    plt.grid(True, alpha=0.2)
+    plt.show()
 
+    # Расчет MAE в процентах
+    mae_pct = np.mean(np.abs(pred_pct - actual_pct))
+    print(f"Средняя ошибка модели: {mae_pct:.2f}%")
 
-
-plt.figure(figsize=(15, 6))
-plt.plot(actual_pct, label='Реальное изменение %', color='royalblue', alpha=0.7)
-plt.plot(pred_pct, label='Предсказание модели %', color='orange', linestyle='--', alpha=0.9)
-
-plt.axhline(0, color='black', linewidth=1, alpha=0.5) # Линия нуля
-plt.title('Предсказание процентного изменения BTC (Tomorrow Returns)')
-plt.xlabel('Дни')
-plt.ylabel('Изменение цены (%)')
-plt.legend()
-plt.grid(True, alpha=0.2)
-plt.show()
-
-# Расчет MAE в процентах
-mae_pct = np.mean(np.abs(pred_pct - actual_pct))
-print(f"Средняя ошибка модели: {mae_pct:.2f}%")
-
-# Расчет точности направления (Directional Accuracy)
-same_direction = np.sign(pred_pct) == np.sign(actual_pct)
-accuracy = np.mean(same_direction) * 100
-print(f"Точность угадывания направления (Up/Down): {accuracy:.2f}%")
+    # Расчет точности направления (Directional Accuracy)
+    same_direction = np.sign(pred_pct) == np.sign(actual_pct)
+    accuracy = np.mean(same_direction) * 100
+    print(f"Точность угадывания направления (Up/Down): {accuracy:.2f}%")

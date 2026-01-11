@@ -86,6 +86,8 @@
 #     print("Не удалось собрать данные. Проверьте лимиты API и доступность Orderbook History для вашего ключа.")
 
 import os
+import time
+
 import requests
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -96,9 +98,7 @@ from dotenv import load_dotenv
 # --- НАСТРОЙКИ ---
 load_dotenv()
 API_KEY = os.getenv('KEY')
-SYMBOL = "BTCUSDT"
-EXCHANGE = "Bybit"
-INTERVAL = "1d"
+
 
 HEADERS = {"accept": "application/json", "CG-API-KEY": API_KEY}
 
@@ -106,6 +106,7 @@ HEADERS = {"accept": "application/json", "CG-API-KEY": API_KEY}
 def fetch_coinglass(endpoint, params):
     url = f"https://open-api-v4.coinglass.com{endpoint}"
     try:
+        time.sleep(0.7)
         response = requests.get(url, params=params, headers=HEADERS)
         res = response.json()
         if res.get("code") == "0" and res.get("data"):
@@ -116,131 +117,164 @@ def fetch_coinglass(endpoint, params):
         print(f"Ошибка при запросе {endpoint}: {e}")
     return pd.DataFrame()
 
+def fetch_data(symbol, interval, exchange):
+    # 1. Загрузка данных (Цена и Открытый интерес)
+    common_params = {"symbol": symbol, "interval": interval, "exchange": exchange, "limit": 1000}
 
-# 1. Загрузка данных (Цена и Открытый интерес)
-common_params = {"symbol": SYMBOL, "interval": INTERVAL, "exchange": EXCHANGE, "limit": 1000}
+    # time open high low close volume_usd
+    print(f"Загрузка Price {exchange}_{symbol}...")
+    df_p = fetch_coinglass("/api/futures/price/history", common_params)
+    # time open high low close
+    print(f"Загрузка Open Interest {exchange}_{symbol} ...")
+    df_oi = fetch_coinglass("/api/futures/open-interest/history", common_params)
 
-print("Загрузка Price...")
-df_p = fetch_coinglass("/api/futures/price/history", common_params)
+    # time global_account_long_percent global_account_short_percent global_account_long_short_ratio
+    print(f"Загрузка Long/Short Ratio {exchange}_{symbol} ...")
+    df_ls = fetch_coinglass("/api/futures/global-long-short-account-ratio/history", common_params)
 
-print("Загрузка Open Interest...")
-df_oi = fetch_coinglass("/api/futures/open-interest/history", common_params)
+    # time taker_buy_volume_usd taker_sell_volume_usd
+    print(f"Загрузка Taker Buy/Sell Volume {exchange}_{symbol}...")
+    df_taker = fetch_coinglass("/api/futures/v2/taker-buy-sell-volume/history", common_params)
 
+    # time long_liquidation_usd short_liquidation_usd
+    print(f"Загрузка LONG/SHORT liquidations {exchange}_{symbol}...")
+    df_liquidation = fetch_coinglass("/api/futures/liquidation/history", common_params)
 
+    if not df_liquidation.empty:
+        # 1. Приводим время
+        df_liquidation['time'] = pd.to_datetime(df_liquidation['time'], unit='ms')
 
-# https://open-api-v4.coinglass.com/api/futures/global-long-short-account-ratio/history
-print("Загрузка Long/Short Ratio...")
-# Эндпоинт для истории соотношения лонгов и шортов
-df_ls = fetch_coinglass("/api/futures/global-long-short-account-ratio/history", common_params)
+        # 2. Преобразуем значения в числа (из строк в float)
+        df_liquidation[f'long_liquidation_usd'] = pd.to_numeric(df_liquidation[f'long_liquidation_usd'])
+        df_liquidation[f'short_liquidation_usd'] = pd.to_numeric(df_liquidation[f'short_liquidation_usd'])
 
+        # 3. (Опционально) Считаем общие ликвидации и дельту ликвидаций
+        df_liquidation[f'{exchange}_{symbol}_total_liquidations'] = df_liquidation[f'long_liquidation_usd'] + df_liquidation[
+            f'short_liquidation_usd']
+        df_liquidation[f'{exchange}_{symbol}_liq_delta'] = df_liquidation[f'long_liquidation_usd'] - df_liquidation[f'short_liquidation_usd']
 
+        df_liquidation = (df_liquidation[['time', 'long_liquidation_usd', 'short_liquidation_usd',f'{exchange}_{symbol}_total_liquidations', f'{exchange}_{symbol}_liq_delta']]
+                    .rename(columns={'long_liquidation_usd': f'{exchange}_{symbol}_long_liquidation_usd',
+                                     'short_liquidation_usd': f'{exchange}_{symbol}_short_liquidation_usd'}))
+    # 2. Обработка и объединение
+    if not df_p.empty and not df_oi.empty and not df_ls.empty:
+        # Приводим время к формату datetime
+        df_p['time'] = pd.to_datetime(df_p['time'], unit='ms')
+        df_oi['time'] = pd.to_datetime(df_oi['time'], unit='ms')
+        df_ls['time'] = pd.to_datetime(df_ls['time'], unit='ms')
+        df_taker['time'] = pd.to_datetime(df_taker['time'], unit='ms')
 
-print("Загрузка Taker Buy/Sell Volume...")
-df_taker = fetch_coinglass("/api/futures/v2/taker-buy-sell-volume/history", common_params)
+        # Преобразуем значения в числа
+        df_taker['taker_buy_volume_usd'] = pd.to_numeric(df_taker['taker_buy_volume_usd'])
+        df_taker['taker_sell_volume_usd'] = pd.to_numeric(df_taker['taker_sell_volume_usd'])
 
-
-print("Загрузка LONG/SHORT liquidations...")
-df_liquidation = fetch_coinglass("/api/futures/liquidation/history", common_params)
-
-if not df_liquidation.empty:
-    # 1. Приводим время
-    df_liquidation['time'] = pd.to_datetime(df_liquidation['time'], unit='ms')
-
-    # 2. Преобразуем значения в числа (из строк в float)
-    df_liquidation['long_liquidation_usd'] = pd.to_numeric(df_liquidation['long_liquidation_usd'])
-    df_liquidation['short_liquidation_usd'] = pd.to_numeric(df_liquidation['short_liquidation_usd'])
-
-    # 3. (Опционально) Считаем общие ликвидации и дельту ликвидаций
-    df_liquidation['total_liquidations'] = df_liquidation['long_liquidation_usd'] + df_liquidation[
-        'short_liquidation_usd']
-    df_liquidation['liq_delta'] = df_liquidation['long_liquidation_usd'] - df_liquidation['short_liquidation_usd']
-# 2. Обработка и объединение
-if not df_p.empty and not df_oi.empty and not df_ls.empty:
-    # Приводим время к формату datetime
-    df_p['time'] = pd.to_datetime(df_p['time'], unit='ms')
-    df_oi['time'] = pd.to_datetime(df_oi['time'], unit='ms')
-    df_ls['time'] = pd.to_datetime(df_ls['time'], unit='ms')
-    df_taker['time'] = pd.to_datetime(df_taker['time'], unit='ms')
-
-    # Преобразуем значения в числа
-    df_taker['taker_buy_volume_usd'] = pd.to_numeric(df_taker['taker_buy_volume_usd'])
-    df_taker['taker_sell_volume_usd'] = pd.to_numeric(df_taker['taker_sell_volume_usd'])
-
-    # Считаем дельту (чистый приток/отток рыночных ордеров)
-    df_taker['taker_delta'] = df_taker['taker_buy_volume_usd'] - df_taker['taker_sell_volume_usd']
-
-
-    # Очистка и переименование колонок
-    df_p = df_p[['time', 'open', 'high', 'low', 'close', 'volume_usd']].rename(columns={'close': 'price'})
-    df_oi = df_oi[['time', 'close']].rename(columns={'close': 'oi'})
-
-    # Из L/S Ratio берем колонку 'ratio' (или 'longShortRatio' в зависимости от версии API)
-    # Обычно в Coinglass V4 это колонка 'longShortRatio' или 'v'
-    # Проверим наличие колонки и переименуем
-    ls_col = 'global_account_long_short_ratio' if 'global_account_long_short_ratio' in df_ls.columns else df_ls.columns[1]
-    df_ls = df_ls[['time', ls_col]].rename(columns={ls_col: 'ls_ratio'})
-
-    # Последовательное объединение
-    final = pd.merge(df_p, df_oi, on='time', how='inner')
-    final = pd.merge(final, df_ls, on='time', how='inner')
-    final = pd.merge(final, df_taker[['time', 'taker_buy_volume_usd', 'taker_sell_volume_usd', 'taker_delta']],
-                     on='time', how='inner')
-
-    # Добавляем ликвидации в итоговый датафрейм
-    final = pd.merge(final, df_liquidation[
-        ['time', 'long_liquidation_usd', 'short_liquidation_usd', 'total_liquidations', 'liq_delta']],
-                     on='time', how='inner')
-
-    # Обновим список числовых колонок для модели
-    numeric_cols = ['open', 'high', 'low', 'price', 'volume_usd', 'oi', 'ls_ratio',
-                    'taker_delta', 'long_liquidation_usd', 'short_liquidation_usd']
-
-    # Убедимся, что все новые колонки числовые
-    final[numeric_cols] = final[numeric_cols].apply(pd.to_numeric)
-
-    print(f"Данные собраны. Строк: {len(final)}. Фичей: {len(numeric_cols)}")
+        # Считаем дельту (чистый приток/отток рыночных ордеров)
+        df_taker[f'{exchange}_{symbol}_taker_delta'] = df_taker['taker_buy_volume_usd'] - df_taker['taker_sell_volume_usd']
 
 
 
+        # Очистка и переименование колонок
+        df_p = (df_p[['time', 'open', 'high', 'low', 'close', 'volume_usd']]
+                .rename(columns={'close': f'{exchange}_{symbol}_price', 'open':f'{exchange}_{symbol}_open', 'high':f'{exchange}_{symbol}_high',
+                                 'low':f'{exchange}_{symbol}_low', 'volume_usd':f'{exchange}_{symbol}_volume_usd'}))
 
 
 
+        #TODO rename columns
+        df_oi = (df_oi[['time','close']]
+                 .rename(columns={'close': f'{exchange}_{symbol}_oi'}))
+
+
+        df_ls = (df_ls[['time' ,'global_account_long_percent' ,'global_account_short_percent' ,'global_account_long_short_ratio']]
+                 .rename(columns={'global_account_long_percent':f'{exchange}_{symbol}_global_account_long_percent',
+                                  'global_account_short_percent':f'{exchange}_{symbol}_global_account_short_percent',
+                                  'global_account_long_short_ratio':f'{exchange}_{symbol}_global_account_long_short_ratio'
+                                  }))
+
+        df_taker = (df_taker[['time', 'taker_buy_volume_usd' ,'taker_sell_volume_usd', f'{exchange}_{symbol}_taker_delta']]
+                 .rename(columns={'taker_buy_volume_usd': f'{exchange}_{symbol}_taker_buy_volume_usd', 'taker_sell_volume_usd': f'{exchange}_{symbol}_taker_sell_volume_usd'}))
+
+        # Из L/S Ratio берем колонку 'ratio' (или 'longShortRatio' в зависимости от версии API)
+        # Обычно в Coinglass V4 это колонка 'longShortRatio' или 'v'
+        # Проверим наличие колонки и переименуем
+        ls_col = f'{exchange}_{symbol}_global_account_long_short_ratio' if f'{exchange}_{symbol}_global_account_long_short_ratio' in df_ls.columns else \
+        df_ls.columns[1]
+        df_ls = df_ls[['time', ls_col]].rename(columns={ls_col: f'{exchange}_{symbol}_ls_ratio'})
+
+        # Последовательное объединение
+        final = pd.merge(df_p, df_oi, on='time', how='inner')
+        final = pd.merge(final, df_ls, on='time', how='inner')
+        final = pd.merge(final, df_taker[['time',f'{exchange}_{symbol}_taker_buy_volume_usd', f'{exchange}_{symbol}_taker_sell_volume_usd', f'{exchange}_{symbol}_taker_delta']],
+                         on='time', how='inner')
+
+        # Добавляем ликвидации в итоговый датафрейм
+        final = pd.merge(final, df_liquidation[
+            ['time', f'{exchange}_{symbol}_long_liquidation_usd', f'{exchange}_{symbol}_short_liquidation_usd'
+                , f'{exchange}_{symbol}_total_liquidations', f'{exchange}_{symbol}_liq_delta']],
+                         on='time', how='inner')
+
+        # Обновим список числовых колонок для модели
+        numeric_cols = [f'{exchange}_{symbol}_open', f'{exchange}_{symbol}_high', f'{exchange}_{symbol}_low', f'{exchange}_{symbol}_price', f'{exchange}_{symbol}_volume_usd', f'{exchange}_{symbol}_oi', f'{exchange}_{symbol}_ls_ratio',
+                        f'{exchange}_{symbol}_taker_delta', f'{exchange}_{symbol}_long_liquidation_usd',  f'{exchange}_{symbol}_short_liquidation_usd']
+
+        # Убедимся, что все новые колонки числовые
+        final[numeric_cols] = final[numeric_cols].apply(pd.to_numeric)
+
+        print(f"Данные собраны. Строк: {len(final)}. Фичей: {len(numeric_cols)}")
+
+        # Преобразуем в числа
+        # numeric_cols = ['open', 'high', 'low', 'price', 'volume_usd', 'oi', 'ls_ratio']
+        # final[numeric_cols] = final[numeric_cols].apply(pd.to_numeric)
+
+        final = final.sort_values('time').reset_index(drop=True)
+
+        # print(f"Данные собраны. Число фичей: {len(numeric_cols)}. Строк: {len(final)}")
+        #
+        # print(f"Данные успешно собраны. Строк: {len(final)}")
+        # print(final.tail())
+        #
+        # # 3. Визуализация
+        # fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(14, 8), sharex=True)
+        #
+        # # График цены
+        # ax1.plot(final['time'], final['price'], color='royalblue', label='BTC Price (Close)')
+        # ax1.set_ylabel('Price (USD)')
+        # ax1.grid(True, alpha=0.3)
+        # ax1.legend()
+        #
+        # # График Open Interest
+        # ax2.plot(final['time'], final['oi'], color='darkorange', label='Open Interest')
+        # ax2.set_ylabel('OI (USD)')
+        # ax2.grid(True, alpha=0.3)
+        # ax2.legend()
+        #
+        # plt.suptitle(f"BTC Analysis: Price & Open Interest ({EXCHANGE})", fontsize=16)
+        # plt.xticks(rotation=45)
+        # plt.tight_layout()
+        # plt.show()
+        return final
+
+    else:
+        print("Не удалось собрать данные. Проверьте API-ключ или лимиты.")
+
+
+bybit_btc_data = fetch_data('BTCUSDT', '4h', 'bybit')
+bybit_eth_data = fetch_data('ETHUSDT', '4h', 'bybit')
+bybit_sol_data = fetch_data('SOLUSDT', '4h', 'bybit')
 
 
 
-    # Преобразуем в числа
-    # numeric_cols = ['open', 'high', 'low', 'price', 'volume_usd', 'oi', 'ls_ratio']
-    # final[numeric_cols] = final[numeric_cols].apply(pd.to_numeric)
+binance_btc_data = fetch_data('BTCUSDT', '4h', 'Binance')
+binance_eth_data = fetch_data('ETHUSDT', '4h', 'Binance')
+binance_sol_data = fetch_data('SOLUSDT', '4h', 'Binance')
 
-    final = final.sort_values('time').reset_index(drop=True)
+final = pd.merge(bybit_btc_data, bybit_eth_data, on='time', how='inner')
+final = pd.merge(final, bybit_sol_data, on='time', how='inner')
+final = pd.merge(final, binance_btc_data, on='time', how='inner')
+final = pd.merge(final, binance_eth_data, on='time', how='inner')
+final = pd.merge(final, binance_sol_data, on='time', how='inner')
 
-    # print(f"Данные собраны. Число фичей: {len(numeric_cols)}. Строк: {len(final)}")
-    #
-    # print(f"Данные успешно собраны. Строк: {len(final)}")
-    # print(final.tail())
-    #
-    # # 3. Визуализация
-    # fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(14, 8), sharex=True)
-    #
-    # # График цены
-    # ax1.plot(final['time'], final['price'], color='royalblue', label='BTC Price (Close)')
-    # ax1.set_ylabel('Price (USD)')
-    # ax1.grid(True, alpha=0.3)
-    # ax1.legend()
-    #
-    # # График Open Interest
-    # ax2.plot(final['time'], final['oi'], color='darkorange', label='Open Interest')
-    # ax2.set_ylabel('OI (USD)')
-    # ax2.grid(True, alpha=0.3)
-    # ax2.legend()
-    #
-    # plt.suptitle(f"BTC Analysis: Price & Open Interest ({EXCHANGE})", fontsize=16)
-    # plt.xticks(rotation=45)
-    # plt.tight_layout()
-    # plt.show()
-
-    # Сохранение для модели
-    final.to_csv("train_data_bybit_.csv", index=False)
-    print("Файл btc_price_oi_ls_taker_data_.csv сохранен.")
-else:
-    print("Не удалось собрать данные. Проверьте API-ключ или лимиты.")
+# Сохранение для модели
+file_name = 'data/data_multiexchange__ethbtcsol_11.01.26.csv'
+final.to_csv(file_name, index=False)
+print(f"Файл {file_name} сохранен.")
